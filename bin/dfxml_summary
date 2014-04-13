@@ -1,0 +1,68 @@
+#!/usr/bin/env ruby
+
+# dfxml_summary dfxml_file.xml
+
+require 'date'
+require 'pp'
+require 'nokogiri'
+require 'json'
+
+file_path = File.expand_path ARGV[0]
+
+summary = {}
+
+class DfxmlDoc < Nokogiri::XML::SAX::Document
+
+  attr_accessor :summary
+
+  def initialize
+    @summary = {}
+  end
+
+  def start_element name, attrs=[]
+    if name == 'fileobject'
+      @fileobject = true
+    end
+    if @fileobject && %w[libmagic mtime atime crtime name_type].include?(name)
+      @field = name
+    end
+  end
+
+  def end_element name
+    if name == 'fileobject'
+      @fileobject = false
+      @field = false
+    end
+  end
+
+  def characters string
+    if @fileobject && @field
+      value = string
+      if %w[mtime atime crtime].include? @field
+        value = DateTime.parse(string).year
+      end
+      if @field == 'libmagic'
+        value = string.split(',').first
+      end
+      @summary[@field] ||= {}
+      @summary[@field][value] ||= 0
+      @summary[@field][value] += 1
+      @field = false
+    end
+  end
+
+end
+
+dfxml_doc = DfxmlDoc.new
+parser = Nokogiri::XML::SAX::Parser.new(dfxml_doc)
+parser.parse(File.open(ARGV[0]))
+
+# Do some sorting
+%w[mtime atime crtime].each do |time|
+  dfxml_doc.summary[time] = Hash[dfxml_doc.summary[time].sort]
+end
+%w[libmagic].each do |field|
+  dfxml_doc.summary[field] = Hash[dfxml_doc.summary[field].sort_by{|k,v| v}.reverse]
+end
+
+puts JSON.pretty_generate(dfxml_doc.summary)
